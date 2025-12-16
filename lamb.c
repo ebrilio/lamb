@@ -254,12 +254,20 @@ typedef struct {
 typedef struct {
     const char *content;
     size_t count;
+    const char *file_path;
 
     Cur cur;
 
     Token_Kind token;
     String_Builder name;
+    size_t row, col;
 } Lexer;
+
+void lexer_print_loc(Lexer *l, FILE *stream)
+{
+    if (l->file_path) fprintf(stream, "%s:", l->file_path);
+    fprintf(stream, "%zu:%zu: ", l->row, l->col);
+}
 
 char lexer_curr_char(Lexer *l)
 {
@@ -283,6 +291,9 @@ bool lexer_next(Lexer *l)
     while (isspace(lexer_curr_char(l))) {
         lexer_next_char(l);
     }
+
+    l->row = l->cur.row + 1;
+    l->col = l->cur.pos - l->cur.bol + 1;
 
     char x = lexer_next_char(l);
     if (x == '\0') {
@@ -310,6 +321,7 @@ bool lexer_next(Lexer *l)
     }
 
     l->token = TOKEN_INVALID;
+    lexer_print_loc(l, stderr);
     fprintf(stderr, "ERROR: Unknown token starts with `%c`\n", x);
     return false;
 }
@@ -326,6 +338,7 @@ bool lexer_expect(Lexer *l, Token_Kind expected)
 {
     if (!lexer_next(l)) return false;
     if (l->token != expected) {
+        lexer_print_loc(l, stderr);
         fprintf(stderr, "ERROR: Unexpected token %s\n", token_kind_display(l->token));
         return false;
     }
@@ -357,6 +370,7 @@ Expr *parse_primary(Lexer *l)
     case TOKEN_LAMBDA: return parse_fun(l);
     case TOKEN_NAME: return var(strdup(l->name.items));
     default:
+        lexer_print_loc(l, stderr);
         fprintf(stderr, "ERROR: Unexpected token %s\n", token_kind_display(l->token));
         return NULL;
     }
