@@ -471,11 +471,57 @@ Expr *parse_expr(Lexer *l)
     return lhs;
 }
 
-char buffer[1024];
+
+typedef struct {
+    const char *name;
+    const char *signature;
+    const char *description;
+} Command;
+
+typedef struct {
+    Command *items;
+    size_t count;
+    size_t capacity;
+} Commands;
+
+bool command(Commands *commands, const char *input, const char *name, const char *signature, const char *description)
+{
+    Command command = {
+        .name        = name,
+        .signature   = signature,
+        .description = description,
+    };
+    da_append(commands, command);
+    return strcmp(input, name) == 0;
+}
+
+void print_available_commands(Commands *commands)
+{
+    printf("Available commands:\n");
+    int max_name_width = 0;
+    int max_sig_width = 0;
+    for (size_t i = 0; i < commands->count; ++i) {
+        Command command = commands->items[i];
+        int name_width = strlen(command.name);
+        int sig_width  = strlen(command.signature);
+        if (name_width > max_name_width) max_name_width = name_width;
+        if (sig_width  > max_sig_width)  max_sig_width  = sig_width;
+    }
+    for (size_t i = 0; i < commands->count; ++i) {
+        Command command = commands->items[i];
+        printf("  :%-*s %-*s - %s\n",
+               max_name_width, command.name,
+               max_sig_width,  command.signature,
+               command.description);
+    }
+}
 
 int main(void)
 {
-    String_Builder sb = {0};
+    static char buffer[1024];
+    static String_Builder sb = {0};
+    static Commands commands = {0};
+
     size_t limit = 10;
     printf(",---@.\n");
     printf(" W-W'\n");
@@ -494,7 +540,8 @@ int main(void)
         if (l.token == TOKEN_COLON) {
             if (!lexer_next(&l)) continue;
             if (!lexer_expect(&l, TOKEN_NAME)) continue;
-            if (strcmp(l.name.items, "limit") == 0) {
+            commands.count = 0;
+            if (command(&commands, l.name.items, "limit", "[number]", "change evaluation limit (0 for no limit)")) {
                 if (!lexer_peek(&l)) continue;
                 switch (l.token) {
                 case TOKEN_NAME:
@@ -519,14 +566,12 @@ int main(void)
                     continue;
                 }
             }
-            if (strcmp(l.name.items, "quit") == 0) break;
-            if (strcmp(l.name.items, "help") == 0) {
-                printf("Available commands:\n");
-                printf("  :limit [number] - change evaluation limit (0 for no limit)\n");
-                printf("  :quit           - quit the REPL\n");
-                printf("  :help           - print this help message\n");
+            if (command(&commands, l.name.items, "quit", "", "quit the REPL")) break;
+            if (command(&commands, l.name.items, "help", "", "print this help message")) {
+                print_available_commands(&commands);
                 continue;
             }
+            print_available_commands(&commands);
             printf("ERROR: unknown command `%s`\n", l.name.items);
             continue;
         }
