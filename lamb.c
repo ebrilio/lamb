@@ -48,6 +48,10 @@
 
 #define sb_append_null(sb) da_append(sb, 0)
 
+typedef struct {
+    size_t unwrap;
+} Expr_Index;
+
 char *copy_string(const char *s)
 {
     int n = strlen(s);
@@ -116,7 +120,7 @@ Var_Name var_name_free(const char *name)
 
 typedef struct {
     Var_Name arg;
-    Expr *body;
+    Expr_Index body;
 } Expr_Fun;
 
 struct Expr {
@@ -127,18 +131,32 @@ struct Expr {
         Var_Name var;
         Expr_Fun fun;
         struct {
-            Expr *lhs;
-            Expr *rhs;
+            Expr_Index lhs;
+            Expr_Index rhs;
         } app;
     } as;
 };
 
-#define EXPR_POOL_CAP 1024
-size_t alive_count = 0;
-Expr expr_pool[EXPR_POOL_CAP] = {0};
-size_t expr_pool_size = 0;
-size_t expr_dead_pool[EXPR_POOL_CAP] = {0};
-size_t expr_dead_pool_size = 0;
+struct {
+    Expr *items;
+    size_t count;
+    size_t capacity;
+} expr_pool = {0};
+
+#define expr_slot(index) (                           \
+    expr_pool.items[                                 \
+        (assert(index.unwrap < expr_pool.count),     \
+         assert(expr_pool.items[index.unwrap].live), \
+         index.unwrap)])
+
+#define expr_slot_unsafe(index) (expr_pool.items[index.unwrap])
+
+struct {
+    Expr_Index *items;
+    size_t count;
+    size_t capacity;
+} expr_dead_pool = {0};
+
 struct {
     const char **items;
     size_t count;
@@ -157,150 +175,152 @@ const char *intern(const char *s)
     return result;
 }
 
-Expr *make_expr(void)
+Expr_Index make_expr(void)
 {
-    Expr *result = NULL;
-    if (expr_dead_pool_size > 0) {
-        result = &expr_pool[expr_dead_pool[--expr_dead_pool_size]];
+    Expr_Index result;
+    if (expr_dead_pool.count > 0) {
+        result = expr_dead_pool.items[--expr_dead_pool.count];
     } else {
-        assert(expr_pool_size < EXPR_POOL_CAP);
-        result = &expr_pool[expr_pool_size++];
+        result.unwrap = expr_pool.count;
+        Expr expr = {0};
+        da_append(&expr_pool, expr);
     }
-    assert(!result->live);
-    result->live = true;
-    alive_count += 1;
+    assert(!expr_slot_unsafe(result).live);
+    expr_slot_unsafe(result).live = true;
     return result;
 }
 
-void kill_expr(Expr *expr)
+void kill_expr(Expr_Index expr)
 {
-    expr->live = false;
-    size_t index = expr - expr_pool;
-    expr_dead_pool[expr_dead_pool_size++] = index;
-    alive_count -= 1;
+    expr_slot(expr).live = false;
+    da_append(&expr_dead_pool, expr);
 }
 
-Expr *var(const char *name)
+Expr_Index var(const char *name)
 {
-    Expr *expr = make_expr();
-    assert(expr != NULL);
-    expr->kind = EXPR_VAR;
-    expr->as.var = var_name_free(intern(name));
+    Expr_Index expr = make_expr();
+    expr_slot(expr).kind = EXPR_VAR;
+    expr_slot(expr).as.var = var_name_free(intern(name));
     return expr;
 }
 
-Expr *fun(const char *arg, Expr *body)
+Expr_Index fun(const char *arg, Expr_Index body)
 {
-    Expr *expr = make_expr();
-    assert(expr != NULL);
-    expr->kind = EXPR_FUN;
-    expr->as.fun.arg = var_name_free(intern(arg));
-    expr->as.fun.body = body;
+    Expr_Index expr = make_expr();
+    expr_slot(expr).kind = EXPR_FUN;
+    expr_slot(expr).as.fun.arg = var_name_free(intern(arg));
+    expr_slot(expr).as.fun.body = body;
     return expr;
 }
 
-Expr *fun_bound(Var_Name arg, Expr *body)
+Expr_Index fun_bound(Var_Name arg, Expr_Index body)
 {
-    Expr *expr = make_expr();
-    assert(expr != NULL);
-    expr->kind = EXPR_FUN;
-    expr->as.fun.arg = arg;
-    expr->as.fun.body = body;
+    Expr_Index expr = make_expr();
+    expr_slot(expr).kind = EXPR_FUN;
+    expr_slot(expr).as.fun.arg = arg;
+    expr_slot(expr).as.fun.body = body;
     return expr;
 }
 
-Expr *app(Expr *lhs, Expr *rhs)
+Expr_Index app(Expr_Index lhs, Expr_Index rhs)
 {
-    Expr *expr = make_expr();
-    assert(expr != NULL);
-    expr->kind = EXPR_APP;
-    expr->as.app.lhs = lhs;
-    expr->as.app.rhs = rhs;
+    Expr_Index expr = make_expr();
+    expr_slot(expr).kind = EXPR_APP;
+    expr_slot(expr).as.app.lhs = lhs;
+    expr_slot(expr).as.app.rhs = rhs;
     return expr;
 }
 
-void expr_display(Expr *expr, String_Builder *sb)
+void expr_display(Expr_Index expr, String_Builder *sb)
 {
-    switch (expr->kind) {
+    switch (expr_slot(expr).kind) {
     case EXPR_VAR:
-        sb_appendf(sb, "%s", expr->as.var.name);
+        sb_appendf(sb, "%s", expr_slot(expr).as.var.name);
         break;
     case EXPR_FUN:
-        sb_appendf(sb, "\\%s.", expr->as.fun.arg.name);
-        expr_display(expr->as.fun.body, sb);
+        sb_appendf(sb, "\\%s.", expr_slot(expr).as.fun.arg.name);
+        expr_display(expr_slot(expr).as.fun.body, sb);
         break;
-    case EXPR_APP:
-        if (expr->as.app.lhs->kind != EXPR_VAR) sb_appendf(sb, "(");
-        expr_display(expr->as.app.lhs, sb);
-        if (expr->as.app.lhs->kind != EXPR_VAR) sb_appendf(sb, ")");
+    case EXPR_APP: {
+        Expr_Index lhs = expr_slot(expr).as.app.lhs;
+        if (expr_slot(lhs).kind != EXPR_VAR) sb_appendf(sb, "(");
+        expr_display(lhs, sb);
+        if (expr_slot(lhs).kind != EXPR_VAR) sb_appendf(sb, ")");
+
         sb_appendf(sb, " ");
-        if (expr->as.app.rhs->kind != EXPR_VAR) sb_appendf(sb, "(");
-        expr_display(expr->as.app.rhs, sb);
-        if (expr->as.app.rhs->kind != EXPR_VAR) sb_appendf(sb, ")");
-        break;
+
+        Expr_Index rhs = expr_slot(expr).as.app.rhs;
+        if (expr_slot(rhs).kind != EXPR_VAR) sb_appendf(sb, "(");
+        expr_display(rhs, sb);
+        if (expr_slot(rhs).kind != EXPR_VAR) sb_appendf(sb, ")");
+    } break;
     default: UNREACHABLE("Expr_Kind");
     }
 }
 
-Expr *replace(Var_Name arg, Expr *body, Expr *val)
+Expr_Index replace(Var_Name arg, Expr_Index body, Expr_Index val)
 {
-    switch (body->kind) {
+    switch (expr_slot(body).kind) {
     case EXPR_VAR:
-        if (body->as.var.name == arg.name && body->as.var.id == arg.id) {
+        if (expr_slot(body).as.var.name == arg.name && expr_slot(body).as.var.id == arg.id) {
             return val;
         } else {
             return body;
         }
     case EXPR_FUN:
         return fun_bound(
-            body->as.fun.arg,
-            replace(arg, body->as.fun.body, val));
+            expr_slot(body).as.fun.arg,
+            replace(arg, expr_slot(body).as.fun.body, val));
     case EXPR_APP:
         return app(
-            replace(arg, body->as.app.lhs, val),
-            replace(arg, body->as.app.rhs, val));
+            replace(arg, expr_slot(body).as.app.lhs, val),
+            replace(arg, expr_slot(body).as.app.rhs, val));
     default: UNREACHABLE("Expr_Kind");
     }
 }
 
-Expr *apply(Expr_Fun fun, Expr *val)
+Expr_Index apply(Expr_Fun fun, Expr_Index val)
 {
     return replace(fun.arg, fun.body, val);
 }
 
-Expr *eval1(Expr *expr)
+Expr_Index eval1(Expr_Index expr)
 {
-    switch (expr->kind) {
+    switch (expr_slot(expr).kind) {
     case EXPR_VAR:
         return expr;
     case EXPR_FUN: {
-        Expr *body = eval1(expr->as.fun.body);
-        if (body != expr->as.fun.body) {
-            return fun_bound(expr->as.fun.arg, body);
+        Expr_Index body = eval1(expr_slot(expr).as.fun.body);
+        if (body.unwrap != expr_slot(expr).as.fun.body.unwrap) {
+            return fun_bound(expr_slot(expr).as.fun.arg, body);
         }
         return expr;
     }
-    case EXPR_APP:
-        if (expr->as.app.lhs->kind == EXPR_FUN) {
-            return apply(expr->as.app.lhs->as.fun, expr->as.app.rhs);
+    case EXPR_APP: {
+        Expr_Index lhs = expr_slot(expr).as.app.lhs;
+        Expr_Index rhs = expr_slot(expr).as.app.rhs;
+
+        if (expr_slot(lhs).kind == EXPR_FUN) {
+            return apply(expr_slot(lhs).as.fun, rhs);
         }
 
-        Expr *lhs = eval1(expr->as.app.lhs);
-        if (lhs != expr->as.app.lhs) {
-            return app(lhs, expr->as.app.rhs);
+        Expr_Index new_lhs = eval1(lhs);
+        if (lhs.unwrap != new_lhs.unwrap) {
+            return app(new_lhs, rhs);
         }
 
-        Expr *rhs = eval1(expr->as.app.rhs);
-        if (rhs != expr->as.app.rhs) {
-            return app(lhs, rhs);
+        Expr_Index new_rhs = eval1(rhs);
+        if (rhs.unwrap != new_rhs.unwrap) {
+            return app(lhs, new_rhs);
         }
 
         return expr;
+    }
     default: UNREACHABLE("Expr_Kind");
     }
 }
 
-void trace_expr(Expr *expr, String_Builder *sb)
+void trace_expr(Expr_Index expr, String_Builder *sb)
 {
     sb->count = 0;
     expr_display(expr, sb);
@@ -308,40 +328,40 @@ void trace_expr(Expr *expr, String_Builder *sb)
     printf("%s\n", sb->items);
 }
 
-void bind_var(Expr *body, Var_Name var)
+void bind_var(Expr_Index body, Var_Name var)
 {
-    switch (body->kind) {
+    switch (expr_slot(body).kind) {
     case EXPR_VAR: {
-        if (body->as.var.name == var.name) {
-            body->as.var.id = var.id;
+        if (expr_slot(body).as.var.name == var.name) {
+            expr_slot(body).as.var.id = var.id;
         }
     } break;
     case EXPR_FUN: {
-        bind_var(body->as.fun.body, var);
+        bind_var(expr_slot(body).as.fun.body, var);
     } break;
     case EXPR_APP: {
-        bind_var(body->as.app.lhs, var);
-        bind_var(body->as.app.rhs, var);
+        bind_var(expr_slot(body).as.app.lhs, var);
+        bind_var(expr_slot(body).as.app.rhs, var);
     } break;
     default: UNREACHABLE("Expr_Kind");
     }
 }
 
-Expr *bind_vars(Expr *expr)
+Expr_Index bind_vars(Expr_Index expr)
 {
     static size_t id_counter = 1;
-    switch (expr->kind) {
+    switch (expr_slot(expr).kind) {
     case EXPR_VAR: return expr;
     case EXPR_FUN: {
-        assert(expr->as.fun.arg.id == 0);
-        expr->as.fun.arg.id = id_counter++;
-        bind_var(expr->as.fun.body, expr->as.fun.arg);
-        bind_vars(expr->as.fun.body);
+        assert(expr_slot(expr).as.fun.arg.id == 0);
+        expr_slot(expr).as.fun.arg.id = id_counter++;
+        bind_var(expr_slot(expr).as.fun.body, expr_slot(expr).as.fun.arg);
+        bind_vars(expr_slot(expr).as.fun.body);
         return expr;
     } break;
     case EXPR_APP: {
-        bind_vars(expr->as.app.lhs);
-        bind_vars(expr->as.app.rhs);
+        bind_vars(expr_slot(expr).as.app.lhs);
+        bind_vars(expr_slot(expr).as.app.rhs);
         return expr;
     } break;
     default: UNREACHABLE("Expr_Kind");
@@ -473,63 +493,63 @@ bool lexer_expect(Lexer *l, Token_Kind expected)
     return true;
 }
 
-Expr *parse_expr(Lexer *l);
+bool parse_expr(Lexer *l, Expr_Index *expr);
 
-Expr *parse_fun(Lexer *l)
+bool parse_fun(Lexer *l, Expr_Index *expr)
 {
-    if (!lexer_expect(l, TOKEN_NAME)) return NULL;
+    if (!lexer_expect(l, TOKEN_NAME)) return false;
     const char *arg = copy_string(l->name.items);
-    if (!lexer_expect(l, TOKEN_DOT)) return NULL;
+    if (!lexer_expect(l, TOKEN_DOT)) return false;
 
     Token_Kind a, b;
     Cur saved = l->cur; {
-        if (!lexer_next(l)) return NULL;
+        if (!lexer_next(l)) return false;
         a = l->token;
-        if (!lexer_next(l)) return NULL;
+        if (!lexer_next(l)) return false;
         b = l->token;
     } l->cur = saved;
 
-    Expr *body;
+    Expr_Index body;
     if (a == TOKEN_NAME && b == TOKEN_DOT) {
-        body = parse_fun(l);
+        if (!parse_fun(l, &body)) return false;
     } else {
-        body = parse_expr(l);
+        if (!parse_expr(l, &body)) return false;
     }
-    if (!body) return NULL;
-    return fun(arg, body);
+    *expr = fun(arg, body);
+    return true;
 }
 
-Expr *parse_primary(Lexer *l)
+bool parse_primary(Lexer *l, Expr_Index *expr)
 {
     if (!lexer_next(l)) return NULL;
     switch (l->token) {
     case TOKEN_OPAREN: {
-        Expr *expr = parse_expr(l);
-        if (!expr) return NULL;
-        if (!lexer_expect(l, TOKEN_CPAREN)) return NULL;
-        return expr;
+        if (!parse_expr(l, expr)) return false;
+        if (!lexer_expect(l, TOKEN_CPAREN)) return false;
+        return true;
     }
-    case TOKEN_LAMBDA: return parse_fun(l);
-    case TOKEN_NAME: return var(copy_string(l->name.items));
+    case TOKEN_LAMBDA: return parse_fun(l, expr);
+    case TOKEN_NAME:
+        *expr = var(copy_string(l->name.items));
+        return true;
     default:
         lexer_print_loc(l, stderr);
         fprintf(stderr, "ERROR: Unexpected token %s\n", token_kind_display(l->token));
-        return NULL;
+        return false;
     }
 }
 
-Expr *parse_expr(Lexer *l)
+bool parse_expr(Lexer *l, Expr_Index *expr)
 {
-    Expr *lhs = parse_primary(l);
-    if (!lhs) return NULL;
-    if (!lexer_peek(l)) return NULL;
+    if (!parse_primary(l, expr)) return false;
+    if (!lexer_peek(l)) return false;
     while (l->token != TOKEN_CPAREN && l->token != TOKEN_END) {
-        Expr *rhs = parse_primary(l);
-        if (!rhs) return NULL;
-        lhs = app(lhs, rhs);
-        if (!lexer_peek(l)) return NULL;
+        Expr_Index rhs;
+        if (!parse_primary(l, &rhs)) return false;
+        *expr = app(*expr, rhs);
+        if (!lexer_peek(l)) return false;
     }
-    return lhs;
+    return true;
 }
 
 
@@ -581,35 +601,34 @@ void print_available_commands(Commands *commands)
     }
 }
 
-void gc_mark(Expr *root)
+void gc_mark(Expr_Index root)
 {
-    if (root == NULL) return;
-    root->visited = true;
-    switch (root->kind) {
+    expr_slot(root).visited = true;
+    switch (expr_slot(root).kind) {
     case EXPR_VAR: break;
     case EXPR_FUN:
-        gc_mark(root->as.fun.body);
+        gc_mark(expr_slot(root).as.fun.body);
         break;
     case EXPR_APP:
-        gc_mark(root->as.app.lhs);
-        gc_mark(root->as.app.rhs);
+        gc_mark(expr_slot(root).as.app.lhs);
+        gc_mark(expr_slot(root).as.app.rhs);
         break;
     }
 }
 
-void gc(Expr *root)
+void gc(Expr_Index root)
 {
-    for (size_t i = 0; i < expr_pool_size; ++i) {
-        if (expr_pool[i].live) {
-            expr_pool[i].visited = false;
+    for (size_t i = 0; i < expr_pool.count; ++i) {
+        if (expr_pool.items[i].live) {
+            expr_pool.items[i].visited = false;
         }
     }
 
     gc_mark(root);
 
-    for (size_t i = 0; i < expr_pool_size; ++i) {
-        if (expr_pool[i].live && !expr_pool[i].visited) {
-            kill_expr(&expr_pool[i]);
+    for (size_t i = 0; i < expr_pool.count; ++i) {
+        if (expr_pool.items[i].live && !expr_pool.items[i].visited) {
+            kill_expr((Expr_Index){i});
         }
     }
 }
@@ -678,25 +697,24 @@ int main(void)
             continue;
         }
 
-        Expr *expr = parse_expr(&l);
-        if (!expr) continue;
+        Expr_Index expr;
+        if (!parse_expr(&l, &expr)) continue;
         bind_vars(expr);
 
         trace_expr(expr, &sb);
-        Expr *expr1 = eval1(expr);
-        for (size_t i = 1; (limit == 0 || i < limit) && expr1 != expr; ++i) {
+        Expr_Index expr1 = eval1(expr);
+        for (size_t i = 1; (limit == 0 || i < limit) && expr1.unwrap != expr.unwrap; ++i) {
             expr = expr1;
             gc(expr);
             trace_expr(expr, &sb);
             expr1 = eval1(expr);
         }
-        if (expr1 != expr) {
+        if (expr1.unwrap != expr.unwrap) {
             printf("...\n");
         }
 
-        expr_pool_size = 0;
-        expr_dead_pool_size = 0;
-        alive_count = 0;
+        expr_pool.count = 0;
+        expr_dead_pool.count = 0;
     }
 
     return 0;
