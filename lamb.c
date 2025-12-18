@@ -9,15 +9,17 @@
 #include <string.h>
 #include <ctype.h>
 
-char *copy_string(const char *s)
-{
-    int n = strlen(s);
-    char *ds = malloc(n + 1);
-    assert(ds);
-    memcpy(ds, s, n);
-    ds[n] = '\0';
-    return ds;
-}
+#if defined(__GNUC__) || defined(__clang__)
+//   https://gcc.gnu.org/onlinedocs/gcc-4.7.2/gcc/Function-Attributes.html
+#    ifdef __MINGW_PRINTF_FORMAT
+#        define PRINTF_FORMAT(STRING_INDEX, FIRST_TO_CHECK) __attribute__ ((format (__MINGW_PRINTF_FORMAT, STRING_INDEX, FIRST_TO_CHECK)))
+#    else
+#        define PRINTF_FORMAT(STRING_INDEX, FIRST_TO_CHECK) __attribute__ ((format (printf, STRING_INDEX, FIRST_TO_CHECK)))
+#    endif // __MINGW_PRINTF_FORMAT
+#else
+//   TODO: implement PRINTF_FORMAT for MSVC
+#    define PRINTF_FORMAT(STRING_INDEX, FIRST_TO_CHECK)
+#endif
 
 #define UNUSED(value) (void)(value)
 #define TODO(message) do { fprintf(stderr, "%s:%d: TODO: %s\n", __FILE__, __LINE__, message); abort(); } while(0)
@@ -46,12 +48,23 @@ char *copy_string(const char *s)
 
 #define sb_append_null(sb) da_append(sb, 0)
 
+char *copy_string(const char *s)
+{
+    int n = strlen(s);
+    char *ds = malloc(n + 1);
+    assert(ds);
+    memcpy(ds, s, n);
+    ds[n] = '\0';
+    return ds;
+}
+
 typedef struct {
     char *items;
     size_t count;
     size_t capacity;
 } String_Builder;
 
+int sb_appendf(String_Builder *sb, const char *fmt, ...) PRINTF_FORMAT(2, 3);
 int sb_appendf(String_Builder *sb, const char *fmt, ...)
 {
     va_list args;
@@ -108,6 +121,8 @@ typedef struct {
 
 struct Expr {
     Expr_Kind kind;
+    bool visited;
+    bool live;
     union {
         Var_Name var;
         Expr_Fun fun;
@@ -118,28 +133,75 @@ struct Expr {
     } as;
 };
 
+#define EXPR_POOL_CAP 1024
+size_t alive_count = 0;
+Expr expr_pool[EXPR_POOL_CAP] = {0};
+size_t expr_pool_size = 0;
+size_t expr_dead_pool[EXPR_POOL_CAP] = {0};
+size_t expr_dead_pool_size = 0;
+struct {
+    const char **items;
+    size_t count;
+    size_t capacity;
+} strings = {0};
+
+const char *intern(const char *s)
+{
+    for (size_t i = 0; i < strings.count; ++i) {
+        if (strcmp(strings.items[i], s) == 0) {
+            return strings.items[i];
+        }
+    }
+    char *result = copy_string(s);
+    da_append(&strings, result);
+    return result;
+}
+
+Expr *make_expr(void)
+{
+    Expr *result = NULL;
+    if (expr_dead_pool_size > 0) {
+        result = &expr_pool[expr_dead_pool[--expr_dead_pool_size]];
+    } else {
+        assert(expr_pool_size < EXPR_POOL_CAP);
+        result = &expr_pool[expr_pool_size++];
+    }
+    assert(!result->live);
+    result->live = true;
+    alive_count += 1;
+    return result;
+}
+
+void kill_expr(Expr *expr)
+{
+    expr->live = false;
+    size_t index = expr - expr_pool;
+    expr_dead_pool[expr_dead_pool_size++] = index;
+    alive_count -= 1;
+}
+
 Expr *var(const char *name)
 {
-    Expr *expr = malloc(sizeof(*expr));
+    Expr *expr = make_expr();
     assert(expr != NULL);
     expr->kind = EXPR_VAR;
-    expr->as.var = var_name_free(name);
+    expr->as.var = var_name_free(intern(name));
     return expr;
 }
 
 Expr *fun(const char *arg, Expr *body)
 {
-    Expr *expr = malloc(sizeof(*expr));
+    Expr *expr = make_expr();
     assert(expr != NULL);
     expr->kind = EXPR_FUN;
-    expr->as.fun.arg = var_name_free(arg);
+    expr->as.fun.arg = var_name_free(intern(arg));
     expr->as.fun.body = body;
     return expr;
 }
 
 Expr *fun_bound(Var_Name arg, Expr *body)
 {
-    Expr *expr = malloc(sizeof(*expr));
+    Expr *expr = make_expr();
     assert(expr != NULL);
     expr->kind = EXPR_FUN;
     expr->as.fun.arg = arg;
@@ -149,7 +211,7 @@ Expr *fun_bound(Var_Name arg, Expr *body)
 
 Expr *app(Expr *lhs, Expr *rhs)
 {
-    Expr *expr = malloc(sizeof(*expr));
+    Expr *expr = make_expr();
     assert(expr != NULL);
     expr->kind = EXPR_APP;
     expr->as.app.lhs = lhs;
@@ -166,7 +228,6 @@ void expr_display(Expr *expr, String_Builder *sb)
     case EXPR_FUN:
         sb_appendf(sb, "\\%s.", expr->as.fun.arg.name);
         expr_display(expr->as.fun.body, sb);
-        sb_appendf(sb, "");
         break;
     case EXPR_APP:
         if (expr->as.app.lhs->kind != EXPR_VAR) sb_appendf(sb, "(");
@@ -185,7 +246,7 @@ Expr *replace(Var_Name arg, Expr *body, Expr *val)
 {
     switch (body->kind) {
     case EXPR_VAR:
-        if (strcmp(body->as.var.name, arg.name) == 0 && body->as.var.id == arg.id) {
+        if (body->as.var.name == arg.name && body->as.var.id == arg.id) {
             return val;
         } else {
             return body;
@@ -251,7 +312,7 @@ void bind_var(Expr *body, Var_Name var)
 {
     switch (body->kind) {
     case EXPR_VAR: {
-        if (strcmp(body->as.var.name, var.name) == 0) {
+        if (body->as.var.name == var.name) {
             body->as.var.id = var.id;
         }
     } break;
@@ -520,6 +581,39 @@ void print_available_commands(Commands *commands)
     }
 }
 
+void gc_mark(Expr *root)
+{
+    if (root == NULL) return;
+    root->visited = true;
+    switch (root->kind) {
+    case EXPR_VAR: break;
+    case EXPR_FUN:
+        gc_mark(root->as.fun.body);
+        break;
+    case EXPR_APP:
+        gc_mark(root->as.app.lhs);
+        gc_mark(root->as.app.rhs);
+        break;
+    }
+}
+
+void gc(Expr *root)
+{
+    for (size_t i = 0; i < expr_pool_size; ++i) {
+        if (expr_pool[i].live) {
+            expr_pool[i].visited = false;
+        }
+    }
+
+    gc_mark(root);
+
+    for (size_t i = 0; i < expr_pool_size; ++i) {
+        if (expr_pool[i].live && !expr_pool[i].visited) {
+            kill_expr(&expr_pool[i]);
+        }
+    }
+}
+
 int main(void)
 {
     static char buffer[1024];
@@ -545,6 +639,10 @@ int main(void)
             if (!lexer_next(&l)) continue;
             if (!lexer_expect(&l, TOKEN_NAME)) continue;
             commands.count = 0;
+            if (command(&commands, l.name.items, "intern", "", "print amount of interned strings")) {
+                printf("Interns: %zu\n", strings.count);
+                continue;
+            }
             if (command(&commands, l.name.items, "limit", "[number]", "change evaluation limit (0 for no limit)")) {
                 if (!lexer_peek(&l)) continue;
                 switch (l.token) {
@@ -588,12 +686,17 @@ int main(void)
         Expr *expr1 = eval1(expr);
         for (size_t i = 1; (limit == 0 || i < limit) && expr1 != expr; ++i) {
             expr = expr1;
+            gc(expr);
             trace_expr(expr, &sb);
             expr1 = eval1(expr);
         }
         if (expr1 != expr) {
             printf("...\n");
         }
+
+        expr_pool_size = 0;
+        expr_dead_pool_size = 0;
+        alive_count = 0;
     }
 
     return 0;
