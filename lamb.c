@@ -987,9 +987,13 @@ void gc(Expr_Index root, Bindings bindings)
 }
 
 // TODO: stop evaluation on ^C
-// TODO: step debug mode instead of tracing mode
+// TODO: step debug mode instead of the tracing mode
 // TODO: use editor from $EDITOR or $LAMB_EDITOR on :edit
-// TODO: it's a bit annoying that lexer forces us to write :edit "file.lamb" instead of just :edit file.lamb
+// TODO(20251219-231632): it's a bit annoying that lexer forces us to write :edit "file.lamb" instead of just :edit file.lamb
+//   Maybe as soon as we parsed TOKEN_COLON and TOKEN_NAME we should just treat the rest of characters as the path without
+//   using the Lexer. Maybe trim whitespaces from both ends and we are good to go. This also means we don't need TOKEN_STRING.
+// TODO: Bug in all the commands that accept active file (:load, :save, :edit, etc) when you provide token that is not TOKEN_STRING.
+//   It treats this as you didn't provide anything at asll. Very like will be invalidated by 20251219-231632.
 // TODO: something to check alpha-equivalence of two terms
 // TODO: consider changing expr_display so it displays shortened up version of exprs so on :save it all looks nice
 // TODO: consider changing evaluation order to lazy
