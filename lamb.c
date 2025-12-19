@@ -986,10 +986,9 @@ void gc(Expr_Index root, Bindings bindings)
     }
 }
 
-// TODO: :load command that loads from a specific file
-// TODO: use editor from $EDITOR or $LAMB_EDITOR on :edit
 // TODO: stop evaluation on ^C
 // TODO: step debug mode instead of tracing mode
+// TODO: use editor from $EDITOR or $LAMB_EDITOR on :edit
 // TODO: it's a bit annoying that lexer forces us to write :edit "file.lamb" instead of just :edit file.lamb
 // TODO: something to check alpha-equivalence of two terms
 // TODO: consider changing expr_display so it displays shortened up version of exprs so on :save it all looks nice
@@ -1035,57 +1034,50 @@ again:
             if (!lexer_next(&l)) goto again;
             if (!lexer_expect(&l, TOKEN_NAME)) goto again;
             commands.count = 0;
-            if (command(&commands, l.string.items, "trace", "", "toggle tracing")) {
-                trace = !trace;
-                if (trace) {
-                    printf("Tracing ENABLED\n");
-                } else {
-                    printf("Tracing DISABLED\n");
+            if (command(&commands, l.string.items, "load", "[path]", "Load/reload bindings from a file.")) {
+                if (!lexer_next(&l)) goto again;
+
+                if (l.token == TOKEN_STRING) {
+                    free(active_file_path);
+                    active_file_path = copy_string(l.string.items);
                 }
-                goto again;
-            }
-            if (command(&commands, l.string.items, "reload", "", "reload all the loaded files")) {
+
                 if (active_file_path == NULL) {
-                    fprintf(stderr, "ERROR: no active file to reload from\n");
+                    fprintf(stderr, "ERROR: no active file to load from\n");
                     goto again;
                 }
+
                 bindings.count = 0;
                 create_bindings_from_file(active_file_path, &bindings);
                 goto again;
             }
-            if (command(&commands, l.string.items, "mem", "", "print memory related stats")) {
-                printf("Interned labels:  %zu\n", labels.count);
-                printf("Allocated exprs:  %zu\n", expr_pool.count);
-                printf("Dead exprs:       %zu\n", expr_dead_pool.count);
-                goto again;
-            }
-            if (command(&commands, l.string.items, "delete", "<binding-name>", "delete a binding by name")) {
-                if (!lexer_expect(&l, TOKEN_NAME)) goto again;
-                Symbol name = symbol(l.string.items);
-                for (size_t i = 0; i < bindings.count; ++i) {
-                    if (symbol_eq(bindings.items[i].name, name)) {
-                        da_delete_at(&bindings, i);
-                        printf("Deleted binding %s\n", name.label);
-                        goto again;
-                    }
+            if (command(&commands, l.string.items, "save", "[path]", "Save current bindings to a file.")) {
+                if (!lexer_next(&l)) goto again;
+
+                if (l.token == TOKEN_STRING) {
+                    free(active_file_path);
+                    active_file_path = copy_string(l.string.items);
                 }
-                printf("ERROR: binding %s was not found\n", name.label);
-                goto again;
-            }
-            if (command(&commands, l.string.items, "list", "", "list all the current bindings")) {
+
+                if (active_file_path == NULL) {
+                    fprintf(stderr, "ERROR: no active file to save to\n");
+                    goto again;
+                }
+
                 static String_Builder sb = {0};
+                sb.count = 0;
                 for (size_t i = 0; i < bindings.count; ++i) {
                     assert(bindings.items[i].name.tag == 0);
-                    sb.count = 0;
                     sb_appendf(&sb, "%s = ", bindings.items[i].name.label);
                     expr_display(bindings.items[i].body, &sb);
-                    sb_appendf(&sb, ";");
-                    sb_append_null(&sb);
-                    printf("%s\n", sb.items);
+                    sb_appendf(&sb, ";\n");
                 }
+
+                if (!write_entire_file(active_file_path, sb.items, sb.count)) goto again;
+                printf("Saved all the bindings to %s\n", active_file_path);
                 goto again;
             }
-            if (command(&commands, l.string.items, "edit", "<path>", "edit current active file")) {
+            if (command(&commands, l.string.items, "edit", "[path]", "Edit current active file. Reload it on exit.")) {
 #ifdef _WIN32
                 fprintf(stderr, "TODO: editing files is not implemented on Windows yet! Sorry!\n");
 #else
@@ -1112,30 +1104,30 @@ again:
 #endif // _WIN32
                 goto again;
             }
-            if (command(&commands, l.string.items, "save", "<path>", "save current bindings to a file")) {
-                if (!lexer_next(&l)) goto again;
-
-                if (l.token == TOKEN_STRING) {
-                    free(active_file_path);
-                    active_file_path = copy_string(l.string.items);
-                }
-
-                if (active_file_path == NULL) {
-                    fprintf(stderr, "ERROR: no active file to save to\n");
-                    goto again;
-                }
-
+            if (command(&commands, l.string.items, "list", "", "list all the current bindings")) {
                 static String_Builder sb = {0};
-                sb.count = 0;
                 for (size_t i = 0; i < bindings.count; ++i) {
                     assert(bindings.items[i].name.tag == 0);
+                    sb.count = 0;
                     sb_appendf(&sb, "%s = ", bindings.items[i].name.label);
                     expr_display(bindings.items[i].body, &sb);
-                    sb_appendf(&sb, ";\n");
+                    sb_appendf(&sb, ";");
+                    sb_append_null(&sb);
+                    printf("%s\n", sb.items);
                 }
-
-                if (!write_entire_file(active_file_path, sb.items, sb.count)) goto again;
-                printf("Saved all the bindings to %s\n", active_file_path);
+                goto again;
+            }
+            if (command(&commands, l.string.items, "delete", "<name>", "delete a binding by name")) {
+                if (!lexer_expect(&l, TOKEN_NAME)) goto again;
+                Symbol name = symbol(l.string.items);
+                for (size_t i = 0; i < bindings.count; ++i) {
+                    if (symbol_eq(bindings.items[i].name, name)) {
+                        da_delete_at(&bindings, i);
+                        printf("Deleted binding %s\n", name.label);
+                        goto again;
+                    }
+                }
+                printf("ERROR: binding %s was not found\n", name.label);
                 goto again;
             }
             if (command(&commands, l.string.items, "limit", "[number]", "change evaluation limit (0 for no limit)")) {
@@ -1162,6 +1154,21 @@ again:
                     fprintf(stderr, "ERROR: Unexpected token %s\n", token_kind_display(l.token));
                     goto again;
                 }
+            }
+            if (command(&commands, l.string.items, "trace", "", "Toggle tracing")) {
+                trace = !trace;
+                if (trace) {
+                    printf("Tracing ENABLED\n");
+                } else {
+                    printf("Tracing DISABLED\n");
+                }
+                goto again;
+            }
+            if (command(&commands, l.string.items, "mem", "", "print memory related stats")) {
+                printf("Interned labels:  %zu\n", labels.count);
+                printf("Allocated exprs:  %zu\n", expr_pool.count);
+                printf("Dead exprs:       %zu\n", expr_dead_pool.count);
+                goto again;
             }
             if (command(&commands, l.string.items, "quit", "", "quit the REPL")) goto quit;
             if (command(&commands, l.string.items, "help", "", "print this help message")) {
