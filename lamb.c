@@ -47,6 +47,14 @@
         (da)->items[(da)->count++] = (item); \
     } while (0)
 
+#define da_delete_at(da, i) \
+    do { \
+       size_t index = (i); \
+       assert(index < (da)->count); \
+       memmove(&(da)->items[index], &(da)->items[index + 1], ((da)->count - index - 1)*sizeof(*(da)->items)); \
+       (da)->count -= 1; \
+    } while(0)
+
 #define sb_append_null(sb) da_append(sb, 0)
 
 char *copy_string(const char *s)
@@ -819,7 +827,6 @@ void gc(Expr_Index root, Bindings bindings)
     }
 }
 
-// TODO: delete bindings from REPL
 // TODO: save current bindings in REPL to a file
 // TODO: step debug mode instead of tracing mode
 // TODO: stop evaluation on ^C
@@ -880,6 +887,19 @@ again:
                 printf("Interned labels:  %zu\n", labels.count);
                 printf("Allocated exprs:  %zu\n", expr_pool.count);
                 printf("Dead exprs:       %zu\n", expr_dead_pool.count);
+                goto again;
+            }
+            if (command(&commands, l.name.items, "delete", "[binding]", "delete a binding by name")) {
+                if (!lexer_expect(&l, TOKEN_NAME)) goto again;
+                Symbol name = symbol(l.name.items);
+                for (size_t i = 0; i < bindings.count; ++i) {
+                    if (symbol_eq(bindings.items[i].name, name)) {
+                        da_delete_at(&bindings, i);
+                        printf("Deleted binding %s\n", name.label);
+                        goto again;
+                    }
+                }
+                printf("ERROR: binding %s was not found\n", name.label);
                 goto again;
             }
             if (command(&commands, l.name.items, "limit", "[number]", "change evaluation limit (0 for no limit)")) {
