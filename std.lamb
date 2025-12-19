@@ -1,15 +1,28 @@
-id   = \x.x;
-zero = \f.x.x;
+id    = \x.x;
+Y     = \f.(\x.f (x x)) (\x.f (x x));
 
+// Booleans
+true  = \x.y.x;
+false = \x.y.y;
+and   = \x.y.x y false;
+or    = \x.y.x true y;
+not   = \x.x false true;
+xor   = \x.y.x (not y) y;
+
+// Numerals
+zero = \f.id;
 one  = \f.x.f x;
 two  = \f.x.f (f x);
 inc  = \n.f.x.f (n f x);
 
-true = \x.y.x;
-false = \x.y.y;
-
-pair = \x.y.f.f x y;
-first = \p.p true;
+// Pairs
+pair   = \x.y.f.f x y;
+first  = \p.p true;
 second = \p.p false;
 
-Y = \f.(\x.f (x x)) (\x.f (x x));
+// Lists
+nil   = pair true true;
+isnil = first;
+cons  = \h.t.pair false (pair h t);
+head  = \l.first (second l);
+tail  = \l.second (second l);

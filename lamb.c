@@ -464,11 +464,34 @@ char lexer_next_char(Lexer *l)
     return x;
 }
 
-// TODO: add comments to the lexer
-bool lexer_next(Lexer *l)
+void lexer_trim_left(Lexer *l)
 {
     while (isspace(lexer_curr_char(l))) {
         lexer_next_char(l);
+    }
+}
+
+bool lexer_starts_with(Lexer *l, const char *prefix)
+{
+    size_t pos = l->cur.pos;
+    while (pos < l->count && *prefix != '\0' && *prefix == l->content[pos]) {
+        pos++;
+        prefix++;
+    }
+    return *prefix == '\0';
+}
+
+void lexer_drop_line(Lexer *l)
+{
+    while (l->cur.pos < l->count && lexer_next_char(l) != '\n') {}
+}
+
+bool lexer_next(Lexer *l)
+{
+    for (;;) {
+        lexer_trim_left(l);
+        if (lexer_starts_with(l, "//")) lexer_drop_line(l);
+        else break;
     }
 
     l->row = l->cur.row + 1;
@@ -521,7 +544,7 @@ bool lexer_expect(Lexer *l, Token_Kind expected)
     if (!lexer_next(l)) return false;
     if (l->token != expected) {
         lexer_print_loc(l, stderr);
-        fprintf(stderr, "ERROR: Unexpected token %s\n", token_kind_display(l->token));
+        fprintf(stderr, "ERROR: Unexpected token %s. Expected %s instead.\n", token_kind_display(l->token), token_kind_display(expected));
         return false;
     }
     return true;
@@ -568,7 +591,7 @@ bool parse_primary(Lexer *l, Expr_Index *expr)
         return true;
     default:
         lexer_print_loc(l, stderr);
-        fprintf(stderr, "ERROR: Unexpected token %s\n", token_kind_display(l->token));
+        fprintf(stderr, "ERROR: Unexpected token %s. Expected a primary expression instead.\n", token_kind_display(l->token));
         return false;
     }
 }
