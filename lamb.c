@@ -973,9 +973,9 @@ void replace_active_file_path_from_lexer_if_not_empty(Lexer l, char **active_fil
     }
 }
 
+// TODO: :save is pretty dangerous since it overrides all the formatting. Maybe it should do YorN?
 // TODO: consider changing expr_display so it displays shortened up version of exprs so on :save it all looks nice
 //   That also means we need a debug tool that prints AST in a non-ambiguous way.
-// TODO: :save is pretty dangerous since it overrides all the formatting. Maybe it should do YorN?
 // TODO: something to check alpha-equivalence of two terms with
 int main(int argc, char **argv)
 {
@@ -1002,7 +1002,7 @@ int main(int argc, char **argv)
     if (argc == 2) {
         active_file_path = copy_string(argv[1]);
     } else if (argc > 2) {
-        fprintf(stderr, "ERROR: only a active file is support right now\n");
+        fprintf(stderr, "ERROR: only a single active file is support right now\n");
         return 1;
     }
 
