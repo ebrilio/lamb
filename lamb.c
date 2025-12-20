@@ -432,7 +432,7 @@ void trace_expr(Expr_Index expr)
     sb.count = 0;
     expr_display(expr, &sb);
     sb_append_null(&sb);
-    printf("%s\n", sb.items);
+    printf("%s", sb.items);
 }
 
 bool is_var_free_there(Symbol name, Expr_Index there)
@@ -520,6 +520,7 @@ bool eval1(Expr_Index expr, Expr_Index *expr1)
                 if (new_rhs.unwrap == rhs.unwrap) {
                     printf("TRACE: ");
                     trace_expr(rhs);
+                    printf("\n");
                     *expr1 = rhs;
                 } else {
                     *expr1 = app(lhs, new_rhs);
@@ -994,7 +995,6 @@ void ctrl_c_handler(int signum)
     ctrl_c = 1;
 }
 
-// TODO: step debug mode instead of the tracing mode
 // TODO: use editor from $EDITOR or $LAMB_EDITOR on :edit
 // TODO(20251219-231632): it's a bit annoying that lexer forces us to write :edit "file.lamb" instead of just :edit file.lamb
 //   Maybe as soon as we parsed TOKEN_COLON and TOKEN_NAME we should just treat the rest of characters as the path without
@@ -1003,7 +1003,6 @@ void ctrl_c_handler(int signum)
 //   It treats this as you didn't provide anything at asll. Very like will be invalidated by 20251219-231632.
 // TODO: something to check alpha-equivalence of two terms
 // TODO: consider changing expr_display so it displays shortened up version of exprs so on :save it all looks nice
-// TODO: consider changing evaluation order to lazy
 int main(int argc, char **argv)
 {
     static char buffer[1024];
@@ -1012,7 +1011,7 @@ int main(int argc, char **argv)
     static Lexer l = {0};
 
 #ifndef _WIN32
-    // TODO: handle ctrl+c on Windows
+    // TODO: Handle ctrl+c on Windows
     struct sigaction act = {0};
     act.sa_handler = ctrl_c_handler;
     sigaction(SIGINT, &act, NULL);
@@ -1033,7 +1032,6 @@ int main(int argc, char **argv)
         create_bindings_from_file(active_file_path, &bindings);
     }
 
-    bool trace = false;
     printf(",---@>\n");
     printf(" W-W'\n");
     printf("Enter :help for more info\n");
@@ -1152,19 +1150,46 @@ again:
                 printf("ERROR: binding %s was not found\n", name.label);
                 goto again;
             }
-            if (command(&commands, l.string.items, "trace", "", "Toggle tracing")) {
-                trace = !trace;
-                if (trace) {
-                    printf("Tracing ENABLED\n");
-                } else {
-                    printf("Tracing DISABLED\n");
+            if (command(&commands, l.string.items, "debug", "<expr>", "Step debug the evaluation of an expression")) {
+                Expr_Index expr;
+                if (!parse_expr(&l, &expr)) goto again;
+                for (size_t i = bindings.count; i > 0; --i) {
+                    expr = replace(bindings.items[i-1].name, expr, bindings.items[i-1].body);
                 }
-                goto again;
-            }
-            if (command(&commands, l.string.items, "mem", "", "print memory related stats")) {
-                printf("Interned labels:  %zu\n", labels.count);
-                printf("Allocated exprs:  %zu\n", expr_pool.count);
-                printf("Dead exprs:       %zu\n", expr_dead_pool.count);
+
+                ctrl_c = 0;
+                for (;;) {
+                    if (ctrl_c) goto again; // TODO(20251220-002405)
+
+                    printf("DEBUG: ");
+                    trace_expr(expr);
+                    printf("\n");
+
+                    printf("-> ");
+                    fflush(stdin);
+
+                    if (!fgets(buffer, sizeof(buffer), stdin)) {
+                        if (feof(stdin)) goto quit;
+                        printf("\n");
+                        goto again;
+                    }
+
+                    lexer_init(&l, buffer, strlen(buffer), NULL);
+                    if (!lexer_next(&l)) goto again;
+                    if (l.token == TOKEN_NAME) {
+                        // TODO: Better debug mode REPL
+                        // Should be on par in quality with the main REPL
+                        if (strcmp(l.string.items, "quit") == 0) goto again;
+                    }
+
+                    gc(expr, bindings);
+
+                    Expr_Index expr1;
+                    if (!eval1(expr, &expr1)) goto again;
+                    if (expr.unwrap == expr1.unwrap) break;
+                    expr = expr1;
+                }
+
                 goto again;
             }
             if (command(&commands, l.string.items, "quit", "", "quit the REPL")) goto quit;
@@ -1201,33 +1226,27 @@ again:
             expr = replace(bindings.items[i-1].name, expr, bindings.items[i-1].body);
         }
 
-        if (trace) trace_expr(expr);
-        Expr_Index expr1;
-        if (!eval1(expr, &expr1)) goto again;
         ctrl_c = 0;
-        for (size_t i = 1; !ctrl_c && expr1.unwrap != expr.unwrap; ++i) {
-            expr = expr1;
+        for (;;) {
+            if (ctrl_c) {
+                // TODO(20251220-002405): Is there perhaps a better way to cancel evaluation by utilizing long jumps from signal handlers?
+                // Is that even legal?
+                // https://www.gnu.org/savannah-checkouts/gnu/libc/manual/html_node/Longjmp-in-Handler.html
+                printf("Evaluation canceled by user.\n");
+                goto again;
+            }
+
             gc(expr, bindings);
-            if (trace) trace_expr(expr);
+
+            Expr_Index expr1;
             if (!eval1(expr, &expr1)) goto again;
+            if (expr.unwrap == expr1.unwrap) break;
+            expr = expr1;
         }
 
-        if (ctrl_c) {
-            // TODO: Is there perhaps a better way to cancel evaluation by utilizing long jumps from signal handlers?
-            // Is that even legal?
-            printf("Evaluation canceled by user.\n");
-            goto again;
-        }
-
-        if (expr1.unwrap != expr.unwrap) {
-            printf("Evaluation limit exceeded.\n");
-            goto again;
-        }
-
-        if (!trace) {
-            printf("RESULT: ");
-            trace_expr(expr);
-        }
+        printf("RESULT: ");
+        trace_expr(expr);
+        printf("\n");
     }
 quit:
 
