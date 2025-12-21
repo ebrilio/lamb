@@ -1072,7 +1072,6 @@ void replace_active_file_path_from_lexer_if_not_empty(Lexer l, char **active_fil
     }
 }
 
-// TODO: something to check alpha-equivalence of two terms with
 int main(int argc, char **argv)
 {
     static char buffer[1024];
