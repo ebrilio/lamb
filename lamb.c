@@ -614,6 +614,15 @@ bool eval1(Expr_Index expr, Expr_Index *expr1)
                     *expr1 = app(lhs, new_rhs);
                 }
                 return true;
+            } else if (expr_slot(lhs).as.mag == intern_label("void")) {
+                Expr_Index new_rhs;
+                if (!eval1(rhs, &new_rhs)) return false;
+                if (new_rhs.unwrap == rhs.unwrap) {
+                    *expr1 = lhs;
+                } else {
+                    *expr1 = app(lhs, new_rhs);
+                }
+                return true;
             } else {
                 printf("ERROR: unknown magic #%s\n", expr_slot(lhs).as.mag);
                 return false;

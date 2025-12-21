@@ -122,7 +122,7 @@ RESULT: (((f a) b) c) d
 
 ### Magics
 
-Magics are special names that start with `#` cannot be used as parameters of functions (that is they are always free), that perform various useful side effects.
+Magics are special names that start with `#` and cannot be used as parameters of functions (that is they are always free). They perform various useful side effects.
 
 `#trace` - when applied to a lambda expression it becomes a potential redex. When reduced it forces the reduction of its argument, prints the reduced argument to the console, and then returns it. Useful for debugging.
 
@@ -134,4 +134,20 @@ TRACE: b
 TRACE: c
 RESULT: ((f a) b) c
 @>
+```
+
+`#void` - when applied to a lambda expression it becomes a potential redex. When reduced it forces the reduction of its argument and returns itself. Useful when you only care about the side effects of the evaluation but not the result which might be long and useless anyway:
+
+```console
+$ ./lamb ./std.lamb
+@> xs = cons 69 (cons 420 (cons 1337 (cons foo (cons bar (cons bar nil)))))
+Updated binding xs
+@> #void (trace_list xs)
+TRACE: 69
+TRACE: 420
+TRACE: 1337
+TRACE: foo
+TRACE: bar
+TRACE: bar
+RESULT: #void
 ```
