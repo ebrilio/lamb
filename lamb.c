@@ -421,34 +421,87 @@ void expr_display(Expr_Index expr, String_Builder *sb)
     case EXPR_VAR:
         sb_appendf(sb, "%s", expr_slot(expr).as.var.label);
         if (expr_slot(expr).as.var.tag) {
-            sb_appendf(sb, "@%zu", expr_slot(expr).as.var.tag);
+            sb_appendf(sb, ":%zu", expr_slot(expr).as.var.tag);
         }
         break;
     case EXPR_FUN:
-        if (expr_slot(expr).as.fun.param.tag) {
-            sb_appendf(sb, "\\%s@%zu.", expr_slot(expr).as.fun.param.label, expr_slot(expr).as.fun.param.tag);
-        } else {
-            sb_appendf(sb, "\\%s.", expr_slot(expr).as.fun.param.label);
+        sb_appendf(sb, "\\");
+        while (expr_slot(expr).kind == EXPR_FUN) {
+            if (expr_slot(expr).as.fun.param.tag) {
+                sb_appendf(sb, "%s:%zu.", expr_slot(expr).as.fun.param.label, expr_slot(expr).as.fun.param.tag);
+            } else {
+                sb_appendf(sb, "%s.", expr_slot(expr).as.fun.param.label);
+            }
+            expr = expr_slot(expr).as.fun.body;
         }
-        expr_display(expr_slot(expr).as.fun.body, sb);
+        expr_display(expr, sb);
         break;
     case EXPR_APP: {
         Expr_Index lhs = expr_slot(expr).as.app.lhs;
-        if (expr_slot(lhs).kind != EXPR_VAR && expr_slot(lhs).kind != EXPR_MAG) sb_appendf(sb, "(");
+        bool lhs_paren = expr_slot(lhs).kind == EXPR_FUN;
+        if (lhs_paren) sb_appendf(sb, "(");
         expr_display(lhs, sb);
-        if (expr_slot(lhs).kind != EXPR_VAR && expr_slot(lhs).kind != EXPR_MAG) sb_appendf(sb, ")");
+        if (lhs_paren) sb_appendf(sb, ")");
 
         sb_appendf(sb, " ");
 
         Expr_Index rhs = expr_slot(expr).as.app.rhs;
-        if (expr_slot(rhs).kind != EXPR_VAR && expr_slot(rhs).kind != EXPR_MAG) sb_appendf(sb, "(");
+        bool rhs_paren = expr_slot(rhs).kind != EXPR_VAR && expr_slot(rhs).kind != EXPR_MAG;
+        if (rhs_paren) sb_appendf(sb, "(");
         expr_display(rhs, sb);
-        if (expr_slot(rhs).kind != EXPR_VAR && expr_slot(rhs).kind != EXPR_MAG) sb_appendf(sb, ")");
+        if (rhs_paren) sb_appendf(sb, ")");
     } break;
     case EXPR_MAG: {
         sb_appendf(sb, "#%s", expr_slot(expr).as.mag);
     } break;
     default: UNREACHABLE("Expr_Kind");
+    }
+}
+
+void dump_expr_ast(Expr_Index expr)
+{
+    static struct {
+        bool *items;
+        size_t count;
+        size_t capacity;
+    } stack = {0};
+
+    for (size_t i = 0; i < stack.count; ++i) {
+        if (i + 1 == stack.count) {
+            printf("+--");
+        } else {
+            if (stack.items[i]) {
+                printf("|  ");
+            } else {
+                printf("   ");
+            }
+        }
+    }
+
+    switch (expr_slot(expr).kind) {
+    case EXPR_VAR:
+        printf("[VAR] %s:%zu\n", expr_slot(expr).as.var.label, expr_slot(expr).as.var.tag);
+        break;
+    case EXPR_FUN:
+        printf("[FUN] \\%s:%zu\n", expr_slot(expr).as.fun.param.label, expr_slot(expr).as.fun.param.tag);
+        da_append(&stack, false); {
+            dump_expr_ast(expr_slot(expr).as.fun.body);
+        } stack.count -= 1;
+        break;
+    case EXPR_APP:
+        printf("[APP]\n");
+        da_append(&stack, true); {
+            dump_expr_ast(expr_slot(expr).as.app.lhs);
+        } stack.count -= 1;
+        da_append(&stack, false); {
+            dump_expr_ast(expr_slot(expr).as.app.rhs);
+        } stack.count -= 1;
+        break;
+    case EXPR_MAG:
+        printf("[MAG] #%s\n", expr_slot(expr).as.mag);
+        break;
+    default:
+        UNREACHABLE("Expr_Index");
     }
 }
 
@@ -914,7 +967,7 @@ void create_binding(Bindings *bindings, Symbol name, Expr_Index body)
             if (name.tag == 0) {
                 printf("Updated binding %s\n", name.label);
             } else {
-                printf("Updated binding %s@%zu\n", name.label, name.tag);
+                printf("Updated binding %s:%zu\n", name.label, name.tag);
             }
             return;
         }
@@ -927,7 +980,7 @@ void create_binding(Bindings *bindings, Symbol name, Expr_Index body)
     if (name.tag == 0) {
         printf("Created binding %s\n", name.label);
     } else {
-        printf("Created binding %s@%zu\n", name.label, name.tag);
+        printf("Created binding %s:%zu\n", name.label, name.tag);
     }
 }
 
@@ -1000,9 +1053,10 @@ void replace_active_file_path_from_lexer_if_not_empty(Lexer l, char **active_fil
     }
 }
 
-// TODO: consider changing expr_display so it displays shortened up version of exprs so on :save it all looks nice
-//   That also means we need a debug tool that prints AST in a non-ambiguous way.
 // TODO: GC slows down the execution significantly when there is too many expr slots allocated in the pool
+// TODO: some sort of way to inspect individual bindings
+//   Something like :list but for one binding.
+//   Maybe just make :list accept the name of the binding.
 // TODO: something to check alpha-equivalence of two terms with
 int main(int argc, char **argv)
 {
@@ -1091,7 +1145,6 @@ again:
                 int exists = file_exists(active_file_path);
                 if (exists < 0) goto again;
                 if (exists) {
-                    bool yes = false;
                     printf("WARNING! This command will override the formatting of %s. Really save? [N/y] ", active_file_path);
                     fflush(stdout);
                     if (!fgets(buffer, sizeof(buffer), stdin)) {
@@ -1194,6 +1247,12 @@ again:
                     expr = expr1;
                 }
 
+                goto again;
+            }
+            if (command(&commands, l.string.items, "ast", "<expr>", "print the AST of the expression")) {
+                Expr_Index expr;
+                if (!parse_expr(&l, &expr)) goto again;
+                dump_expr_ast(expr);
                 goto again;
             }
             if (command(&commands, l.string.items, "quit", "", "quit the REPL")) goto quit;
