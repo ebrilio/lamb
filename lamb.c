@@ -341,53 +341,56 @@ typedef struct {
 } Expr;
 
 static struct {
-    Expr *items;
-    size_t count;
-    size_t capacity;
-} expr_slots = {0};
+    struct {
+        Expr *items;
+        size_t count;
+        size_t capacity;
+    } slots;
 
-#define expr_slot(index) (                              \
-    expr_slots.items[                                   \
-        (assert((index).unwrap < expr_slots.count),     \
-         assert(expr_slots.items[(index).unwrap].live), \
+    struct {
+        Expr_Index *items;
+        size_t count;
+        size_t capacity;
+    } dead;
+
+    struct {
+        Expr_Index *items;
+        size_t count;
+        size_t capacity;
+    } gens[2];
+
+    size_t gen_cur;
+} GC = {0};
+
+#define expr_slot(index) (                            \
+    GC.slots.items[                                   \
+        (assert((index).unwrap < GC.slots.count),     \
+         assert(GC.slots.items[(index).unwrap].live), \
          (index).unwrap)])
 
-#define expr_slot_unsafe(index) expr_slots.items[(index).unwrap]
+#define expr_slot_unsafe(index) GC.slots.items[(index).unwrap]
 
-static struct {
-    Expr_Index *items;
-    size_t count;
-    size_t capacity;
-} expr_dead = {0};
-
-static struct {
-    Expr_Index *items;
-    size_t count;
-    size_t capacity;
-} expr_gens[2] = {0};
-
-static size_t expr_gen_cur = 0;
 
 Expr_Index alloc_expr(void)
 {
     Expr_Index result;
-    if (expr_dead.count > 0) {
-        result = expr_dead.items[--expr_dead.count];
+    if (GC.dead.count > 0) {
+        result = GC.dead.items[--GC.dead.count];
     } else {
-        result.unwrap = expr_slots.count;
+        result.unwrap = GC.slots.count;
         Expr expr = {0};
-        da_append(&expr_slots, expr);
+        da_append(&GC.slots, expr);
     }
     assert(!expr_slot_unsafe(result).live);
     expr_slot_unsafe(result).live = true;
-    da_append(&expr_gens[expr_gen_cur], result);
+    da_append(&GC.gens[GC.gen_cur], result);
     return result;
 }
 
 void free_expr(Expr_Index expr)
 {
     expr_slot(expr).live = false;
-    da_append(&expr_dead, expr);
+    da_append(&GC.dead, expr);
 }
 
 Expr_Index var(Symbol name)
@@ -1041,8 +1044,8 @@ bool create_bindings_from_file(const char *file_path, Bindings *bindings)
 
 void gc(Expr_Index root, Bindings bindings)
 {
-    for (size_t i = 0; i < expr_gens[expr_gen_cur].count; ++i) {
-        Expr_Index expr = expr_gens[expr_gen_cur].items[i];
+    for (size_t i = 0; i < GC.gens[GC.gen_cur].count; ++i) {
+        Expr_Index expr = GC.gens[GC.gen_cur].items[i];
         expr_slot(expr).visited = false;
     }
 
@@ -1051,17 +1054,17 @@ void gc(Expr_Index root, Bindings bindings)
         gc_mark(bindings.items[i].body);
     }
 
-    size_t expr_gen_next = 1 - expr_gen_cur;
-    expr_gens[expr_gen_next].count = 0;
-    for (size_t i = 0; i < expr_gens[expr_gen_cur].count; ++i) {
-        Expr_Index expr = expr_gens[expr_gen_cur].items[i];
+    size_t next = 1 - GC.gen_cur;
+    GC.gens[next].count = 0;
+    for (size_t i = 0; i < GC.gens[GC.gen_cur].count; ++i) {
+        Expr_Index expr = GC.gens[GC.gen_cur].items[i];
         if (expr_slot(expr).visited) {
-            da_append(&expr_gens[expr_gen_next], expr);
+            da_append(&GC.gens[next], expr);
         } else {
             free_expr(expr);
         }
     }
-    expr_gen_cur = expr_gen_next;
+    GC.gen_cur = next;
 }
 
 static volatile sig_atomic_t ctrl_c = 0;
